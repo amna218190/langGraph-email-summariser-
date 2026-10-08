@@ -1,38 +1,14 @@
 import os
 from dotenv import load_dotenv
 
-from langchain_mistralai import ChatMistralAI
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import Runnable
+from graph import build_email_graph
 
 load_dotenv()
 
 
-def build_email_agent(
-    model_name: str = "open-mistral-7b", temperature: float = 0.0
-) -> Runnable:
-    """Builds and returns the runnable email evaluation chain."""
-    llm = ChatMistralAI(
-        model=model_name,
-        temperature=temperature,
-        api_key=os.getenv("MISTRAL_API_KEY"),
-    )
-
-    prompt = ChatPromptTemplate.from_messages([
-        (
-            "system",
-            "You are an AI email assistant. Analyze the incoming email and summarize its contents.",
-        ),
-        (
-            "human",
-            "From: {sender}\nSubject: {subject}\n\nEmail Text:\n{email_text}",
-        ),
-    ])
-
-    output_parser = StrOutputParser()
-
-    return prompt | llm | output_parser
+def build_email_agent():
+    """Builds and returns the runnable email evaluation agent (LangGraph workflow)."""
+    return build_email_graph()
 
 
 def run_agent(email_data: dict) -> dict:
@@ -40,23 +16,37 @@ def run_agent(email_data: dict) -> dict:
     sender = email_data.get("sender", "Unknown")
     subject = email_data.get("subject", "No Subject")
     email_text = email_data.get("body") or email_data.get("text", "")
+    email_id = email_data.get("id", "")
 
     print(f"\n[AGENT] Received email from: {sender}")
     print(f"[AGENT] Subject: {subject}")
-    print("[AGENT] Processing with Mistral 7B...")
+    print("[AGENT] Processing through email agent...")
 
     agent = build_email_agent()
-
-    result = agent.invoke({
+    initial_state = {
+        "id": email_id,
         "sender": sender,
         "subject": subject,
-        "email_text": email_text,
-    })
+        "text": email_text,
+        "is_spam": False,
+        "spam_reason": "",
+        "summary": "",
+    }
+
+    final_state = agent.invoke(initial_state)
+
+    if final_state.get("is_spam"):
+        output_response = (
+            f"[SPAM DETECTED] Email will not be summarized.\n"
+            f"Reason: {final_state.get('spam_reason')}"
+        )
+    else:
+        output_response = final_state.get("summary", "No summary generated.")
 
     return {
         "sender": sender,
         "subject": subject,
-        "response": result,
+        "response": output_response,
     }
 
 
